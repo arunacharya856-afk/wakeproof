@@ -39,6 +39,21 @@ object BedChecker {
         "If the screen is not Anki, or today's studied-card count is not visible or readable, use -1. " +
         "Reply with ONLY JSON: {\"cards\": number, \"reason\": \"under 15 words\"}"
 
+    private const val LIBRARY_PROMPT =
+        "This photo comes from a study alarm app: the user felt tired and must prove they went to a library " +
+        "by taking a selfie there. Pass only if a real person is visible AND the setting clearly looks like a " +
+        "library or library-style study space (bookshelves, rows of study tables or carrels, library reading room). " +
+        "Fail if it looks like a bedroom, a bed, a couch at home, a kitchen, outdoors, or a photo of a screen. " +
+        "Reply with ONLY JSON: {\"ok\": true or false, \"reason\": \"under 15 words\"}"
+
+    /** Is this a selfie at a library? */
+    fun checkLibrary(apiKey: String, bmp: Bitmap): Result {
+        val (json, err) = ask(apiKey, bmp, LIBRARY_PROMPT, maxSide = 1024)
+        if (json == null) return Result.Failed(err ?: "No answer")
+        return if (json.optBoolean("ok", false)) Result.Made
+        else Result.NotMade(json.optString("reason", "Doesn't look like a library"))
+    }
+
     fun loadBitmap(ctx: Context, uri: Uri, maxSide: Int = 2000): Bitmap? {
         return try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

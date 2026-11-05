@@ -58,6 +58,7 @@ class MainActivity : Activity() {
     private lateinit var studyTimeBtn: Button
     private lateinit var studyCardsEt: EditText
     private lateinit var studyQuietEt: EditText
+    private lateinit var libEt: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -107,6 +108,17 @@ class MainActivity : Activity() {
 
         permBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(permBox, Ui.lp(this, 12))
+
+        // Tired → library
+        val tired = Ui.card(this)
+        tired.addView(Ui.button(this, "😴  I'm tired — get me to the library") { confirmLibrary() })
+        libEt = numberField(prefs.libMin)
+        tired.addView(row("Minutes to get there", libEt), Ui.lp(this, 10))
+        tired.addView(
+            Ui.text(this, "Rings when time's up until a selfie at the library passes.", 13f, Ui.MUTED),
+            Ui.lp(this, 4)
+        )
+        col.addView(tired, Ui.lp(this, 12))
 
         // Alarm card
         val alarm = Ui.card(this)
@@ -236,6 +248,26 @@ class MainActivity : Activity() {
             set(Calendar.MINUTE, studyMinute)
         }
         studyTimeBtn.text = "At desk by " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(cal.time)
+    }
+
+    private fun confirmLibrary() {
+        save(showToast = false)
+        AlertDialog.Builder(this)
+            .setTitle("Head to the library?")
+            .setMessage(
+                "You have ${prefs.libMin} minutes. After that the alarm rings until you take a selfie at the " +
+                    "library. No way to cancel once it starts."
+            )
+            .setPositiveButton("Go") { _, _ ->
+                prefs.resetChallenge(test = false, mode = Prefs.MODE_LIBRARY)
+                prefs.startedAt = System.currentTimeMillis()
+                prefs.phase = AlarmActivity.PH_STUDY
+                prefs.ringing = true
+                AlarmService.command(this, AlarmService.ACTION_QUIET, prefs.libMs)
+                startActivity(Intent(this, AlarmActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            .setNegativeButton("Not now", null)
+            .show()
     }
 
     private fun confirmStudyTest() {
@@ -371,6 +403,8 @@ class MainActivity : Activity() {
         prefs.studyMinute = studyMinute
         prefs.studyCards = studyCardsEt.intOr(20).coerceIn(1, 1000)
         prefs.studyQuietMin = studyQuietEt.intOr(20).coerceIn(5, 120)
+        prefs.libMin = libEt.intOr(20).coerceIn(3, 90)
+        libEt.setText(prefs.libMin.toString())
         studyCardsEt.setText(prefs.studyCards.toString())
         studyQuietEt.setText(prefs.studyQuietMin.toString())
         pushupsEt.setText(prefs.pushups.toString())

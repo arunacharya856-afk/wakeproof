@@ -62,6 +62,8 @@ class AlarmService : Service() {
             stopEverything()
             return START_NOT_STICKY
         }
+        // Keep the CPU awake so the "time's up" sound fires on time even with the screen off.
+        acquireWake()
         handle(intent?.action ?: ACTION_START, intent?.getLongExtra(EXTRA_GRACE, 5000L) ?: 5000L)
         return START_STICKY
     }
@@ -198,11 +200,16 @@ class AlarmService : Service() {
             this, 2001, open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val study = Prefs(this).mode == Prefs.MODE_STUDY
+        val mode = Prefs(this).mode
+        val (title, body) = when (mode) {
+            Prefs.MODE_STUDY -> "Desk time — show your Anki" to "Tap when you're at your desk"
+            Prefs.MODE_LIBRARY -> "Get to the library 📚" to "Rings when time's up — tap to take your library selfie"
+            else -> "Wake up — prove it" to "Tap to start your push-ups"
+        }
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notif)
-            .setContentTitle(if (study) "Desk time — show your Anki" else "Wake up — prove it")
-            .setContentText(if (study) "Tap when you're at your desk" else "Tap to start your push-ups")
+            .setContentTitle(title)
+            .setContentText(body)
             .setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOngoing(true)

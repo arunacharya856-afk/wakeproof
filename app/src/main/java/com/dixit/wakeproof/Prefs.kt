@@ -88,6 +88,12 @@ class Prefs(ctx: Context) {
 
     val studyMs: Long get() = if (testMode) 2 * 60_000L else studyQuietMin * 60_000L
 
+    // ---- Tired → library ----
+    var libMin: Int
+        get() = sp.getInt("libMin", 20)
+        set(v) = edit { putInt("libMin", v) }
+    val libMs: Long get() = libMin * 60_000L
+
     // ---- Stats ----
     var streak: Int
         get() = sp.getInt("streak", 0)
@@ -137,6 +143,7 @@ class Prefs(ctx: Context) {
 
     /** Updates the right streak when a real (non-test) alarm is completed. */
     fun recordDone(): Int {
+        if (mode == MODE_LIBRARY) return 0
         val study = mode == MODE_STUDY
         val cur = if (study) studyStreak else streak
         if (testMode) return cur
@@ -155,5 +162,6 @@ class Prefs(ctx: Context) {
     companion object {
         const val MODE_WAKE = 0
         const val MODE_STUDY = 1
+        const val MODE_LIBRARY = 2
     }
 }

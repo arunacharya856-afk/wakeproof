@@ -109,7 +109,9 @@ class AlarmActivity : Activity(), SensorEventListener {
 
     override fun onStop() {
         super.onStop()
-        // Leaving the screen (home button, switching apps, locking) brings the sound back right away.
+        // Leaving the screen (home button, switching apps, locking) brings the sound back right away —
+        // except during the library countdown, when you're supposed to put the phone away and walk.
+        if (isLib() && libLeft() > 0) return
         if (!inCamera && prefs.ringing && prefs.phase != PH_DONE) {
             AlarmService.command(this, AlarmService.ACTION_LOUD)
         }
@@ -201,6 +203,10 @@ class AlarmActivity : Activity(), SensorEventListener {
             renderStudy(phase, now)
             return
         }
+        if (isLib()) {
+            renderLib(phase)
+            return
+        }
 
         when (phase) {
             PH_IDLE -> {
@@ -267,8 +273,59 @@ class AlarmActivity : Activity(), SensorEventListener {
 
     private fun isStudy() = prefs.mode == Prefs.MODE_STUDY
 
+    private fun isLib() = prefs.mode == Prefs.MODE_LIBRARY
+
+    /** Milliseconds left to reach the library (negative once time is up). */
+    private fun libLeft(): Long = prefs.libMs - (System.currentTimeMillis() - prefs.startedAt)
+
     /** The step you return to after a failed photo check. */
-    private fun photoPhase() = if (isStudy()) PH_STUDY else PH_BED
+    private fun photoPhase() = if (isStudy() || isLib()) PH_STUDY else PH_BED
+
+    private fun renderLib(phase: Int) {
+        val left = libLeft()
+        when (phase) {
+            PH_STUDY, PH_IDLE -> {
+                titleTv.text = "Get to the library 📚"
+                bigTv.textSize = 56f
+                if (left > 0) {
+                    bigTv.text = fmtLeft(left)
+                    soundTv.text = "🔇 Quiet until time's up"
+                    soundTv.setTextColor(Ui.MUTED)
+                    infoTv.text = "Lock your phone and go. When you're there, open this and take a selfie " +
+                        "with the library behind you (shelves or study tables)." +
+                        if (prefs.apiKey.isBlank()) "\n\nNo AI key saved, so any fresh photo counts." else ""
+                    timerTv.text = "Rings at the end until your library selfie passes."
+                } else {
+                    bigTv.setTextColor(Ui.BAD)
+                    bigTv.text = "Time's up"
+                    infoTv.text = "It keeps ringing until a library selfie passes."
+                    timerTv.text = ""
+                }
+                actionBtn.text = "🤳  Selfie at the library"
+                if (netFails >= 2) {
+                    altBtn.visibility = View.VISIBLE
+                    altBtn.text = "Can't reach the AI — accept without check"
+                }
+            }
+            PH_CHECK -> {
+                titleTv.text = "Checking your selfie…"
+                bigTv.textSize = 26f
+                bigTv.text = "🤔"
+                infoTv.text = "Hang on a few seconds."
+                timerTv.text = ""
+                actionBtn.visibility = View.GONE
+            }
+            PH_DONE -> {
+                titleTv.text = "You made it."
+                bigTv.textSize = 40f
+                bigTv.setTextColor(Ui.GOOD)
+                bigTv.text = "📚 Now study"
+                infoTv.text = "Alarm off. Tired brains still learn — start with easy Anki reviews."
+                timerTv.text = ""
+                actionBtn.text = "Close"
+            }
+        }
+    }
 
     private fun renderStudy(phase: Int, now: Long) {
         val target = prefs.studyCards
@@ -334,6 +391,14 @@ class AlarmActivity : Activity(), SensorEventListener {
 
     private fun updateSound() {
         if (!prefs.ringing || prefs.phase == PH_DONE) return
+        if (isLib()) {
+            // Quiet for the whole remaining countdown, even if this screen closes.
+            val left = libLeft()
+            if (prefs.phase == PH_CHECK) AlarmService.command(this, AlarmService.ACTION_QUIET, 5000L)
+            else if (left > 0) AlarmService.command(this, AlarmService.ACTION_QUIET, left)
+            else AlarmService.command(this, AlarmService.ACTION_LOUD)
+            return
+        }
         val now = System.currentTimeMillis()
         val overLimit = prefs.startedAt > 0 && now - prefs.startedAt > prefs.limitMs
         val quiet = when (prefs.phase) {
@@ -485,10 +550,17 @@ class AlarmActivity : Activity(), SensorEventListener {
             putExtra(MediaStore.EXTRA_OUTPUT, uri)
             clipData = ClipData.newRawUri("photo", uri)
             addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (isLib()) {
+                // Ask for the front (selfie) camera; most camera apps honour at least one of these.
+                putExtra("android.intent.extras.CAMERA_FACING", 1)
+                putExtra("android.intent.extras.LENS_FACING_FRONT", 1)
+                putExtra("android.intent.extra.USE_FRONT_CAMERA", true)
+            }
         }
         inCamera = true
-        // Give 2 minutes of quiet in the camera; after that the sound returns.
-        AlarmService.command(this, AlarmService.ACTION_QUIET, 120_000L)
+        // Give 2 minutes of quiet in the camera (or the rest of the library countdown); then the sound returns.
+        val grace = if (isLib()) maxOf(120_000L, libLeft()) else 120_000L
+        AlarmService.command(this, AlarmService.ACTION_QUIET, grace)
         try {
             startActivityForResult(i, REQ_PHOTO)
         } catch (e: ActivityNotFoundException) {
@@ -517,6 +589,7 @@ class AlarmActivity : Activity(), SensorEventListener {
         render()
         val key = prefs.apiKey
         val study = isStudy()
+        val lib = isLib()
         val target = prefs.studyCards
         Thread {
             val bmp = BedChecker.loadBitmap(this, uri)
@@ -524,6 +597,7 @@ class AlarmActivity : Activity(), SensorEventListener {
                 bmp == null -> BedChecker.Result.Failed("Photo was empty")
                 key.isBlank() -> BedChecker.Result.Made // No API key: any fresh photo counts.
                 study -> BedChecker.checkAnki(key, bmp, target)
+                lib -> BedChecker.checkLibrary(key, bmp)
                 else -> BedChecker.check(key, bmp)
             }
             deletePhoto(uri)
