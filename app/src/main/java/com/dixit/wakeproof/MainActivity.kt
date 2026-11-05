@@ -144,7 +144,7 @@ class MainActivity : Activity() {
         ai.addView(
             Ui.text(
                 this,
-                "Paste a free Gemini key (aistudio.google.com, starts with AIza) or a Claude key " +
+                "Paste a free Gemini key (aistudio.google.com) or a Claude key " +
                     "(console.anthropic.com, starts with sk-ant-). The app picks the right AI from the key. " +
                     "Without a key, any fresh photo counts.",
                 14f, Ui.MUTED
@@ -153,7 +153,7 @@ class MainActivity : Activity() {
         )
         keyEt = EditText(this).apply {
             setText(prefs.apiKey)
-            hint = "AIza… or sk-ant-…"
+            hint = "Gemini key or sk-ant-…"
             setTextColor(Ui.TEXT)
             setHintTextColor(Ui.MUTED)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD

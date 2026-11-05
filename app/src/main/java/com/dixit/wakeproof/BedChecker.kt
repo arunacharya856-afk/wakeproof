@@ -44,10 +44,10 @@ object BedChecker {
         }
     }
 
-    /** Picks the AI from the key: Google keys start with "AIza", Claude keys with "sk-ant-". */
+    /** Picks the AI from the key: Claude keys start with "sk-ant-"; anything else is treated as a Google/Gemini key. */
     fun providerName(key: String): String = if (isGemini(key)) "Gemini" else "Claude"
 
-    private fun isGemini(key: String) = key.trim().startsWith("AIza")
+    private fun isGemini(key: String) = !key.trim().startsWith("sk-ant-")
 
     fun check(apiKey: String, bmp: Bitmap): Result {
         val b64 = try {
