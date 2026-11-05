@@ -16,6 +16,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -49,6 +50,8 @@ class MainActivity : Activity() {
     private lateinit var rampSw: Switch
     private lateinit var keyEt: EditText
     private lateinit var permBox: LinearLayout
+    private lateinit var saveBtn: Button
+    private lateinit var scroll: ScrollView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -162,18 +165,36 @@ class MainActivity : Activity() {
         ai.addView(keyEt, Ui.lp(this, 6))
         col.addView(ai, Ui.lp(this, 12))
 
-        col.addView(Ui.button(this, "Save") { save(showToast = true) }, Ui.lp(this, 18))
+        saveBtn = Ui.button(this, "Save") { onSaveTapped() }
+        col.addView(saveBtn, Ui.lp(this, 18))
         col.addView(
             Ui.button(this, "Test alarm now (3 push-ups)", Ui.CARD, Ui.TEXT) { confirmTest() },
             Ui.lp(this, 10)
         )
 
-        val scroll = ScrollView(this).apply {
+        scroll = ScrollView(this).apply {
             setBackgroundColor(Ui.BG)
             addView(col)
         }
         setContentView(scroll)
         updateTimeButton()
+    }
+
+    /** Saves, hides the keyboard, and makes it obvious that it worked. */
+    private fun onSaveTapped() {
+        save(showToast = true)
+        currentFocus?.clearFocus()
+        try {
+            getSystemService(InputMethodManager::class.java)
+                .hideSoftInputFromWindow(scroll.windowToken, 0)
+        } catch (e: Exception) {}
+        val t = if (prefs.enabled) Scheduler.nextTrigger(prefs) else null
+        saveBtn.text = when {
+            !prefs.enabled -> "✓ Saved — alarm is OFF (turn it on at the top)"
+            t == null -> "✓ Saved — pick at least one day"
+            else -> "✓ Saved — next alarm ${fmtTime(t)}"
+        }
+        saveBtn.postDelayed({ saveBtn.text = "Save" }, 4000)
     }
 
     private fun buildDaysRow(): LinearLayout {
