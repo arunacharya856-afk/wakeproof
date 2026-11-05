@@ -140,11 +140,12 @@ class MainActivity : Activity() {
 
         // AI card
         val ai = Ui.card(this)
-        ai.addView(Ui.text(this, "Bed check with Claude (optional)", 18f, Ui.TEXT, true))
+        ai.addView(Ui.text(this, "AI bed check (optional)", 18f, Ui.TEXT, true))
         ai.addView(
             Ui.text(
                 this,
-                "Paste a Claude API key (from console.anthropic.com) so Claude checks the bed photo. " +
+                "Paste a free Gemini key (aistudio.google.com, starts with AIza) or a Claude key " +
+                    "(console.anthropic.com, starts with sk-ant-). The app picks the right AI from the key. " +
                     "Without a key, any fresh photo counts.",
                 14f, Ui.MUTED
             ),
@@ -152,7 +153,7 @@ class MainActivity : Activity() {
         )
         keyEt = EditText(this).apply {
             setText(prefs.apiKey)
-            hint = "sk-ant-…"
+            hint = "AIza… or sk-ant-…"
             setTextColor(Ui.TEXT)
             setHintTextColor(Ui.MUTED)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD

@@ -230,14 +230,14 @@ class AlarmActivity : Activity(), SensorEventListener {
                 bigTv.setTextColor(Ui.GOOD)
                 bigTv.text = "✔ ${prefs.target} push-ups done"
                 infoTv.text = "Make your bed, then take a photo of it" +
-                    if (prefs.apiKey.isBlank()) "." else " — Claude will check it."
+                    if (prefs.apiKey.isBlank()) "." else " — ${BedChecker.providerName(prefs.apiKey)} will check it."
                 val bedLeft = prefs.bedMs - (now - prefs.bedStartedAt)
                 timerTv.text = if (bedLeft > 0) "${fmtLeft(bedLeft)} of quiet left to make it"
                 else "⏰ Bed time is up — the alarm rings until your photo passes"
                 actionBtn.text = "📷  Take photo of bed"
                 if (netFails >= 2) {
                     altBtn.visibility = View.VISIBLE
-                    altBtn.text = "Can't reach Claude — accept without check"
+                    altBtn.text = "Can't reach the AI — accept without check"
                 }
             }
             PH_CHECK -> {
