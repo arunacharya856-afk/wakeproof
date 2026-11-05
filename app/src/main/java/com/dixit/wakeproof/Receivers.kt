@@ -8,7 +8,15 @@ import android.content.Intent
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val p = Prefs(ctx)
-        p.resetChallenge(test = false)
+        val mode = intent.getIntExtra(EXTRA_MODE, Prefs.MODE_WAKE)
+        if (p.ringing) {
+            // Still doing the wake-up routine: run the desk check straight after it.
+            if (mode == Prefs.MODE_STUDY && p.mode == Prefs.MODE_WAKE) p.studyQueued = true
+            Scheduler.scheduleNext(ctx)
+            return
+        }
+        p.studyQueued = false
+        p.resetChallenge(test = false, mode = mode)
         p.ringing = true
         try {
             AlarmService.start(ctx)
@@ -20,6 +28,7 @@ class AlarmReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_FIRE = "com.dixit.wakeproof.FIRE"
+        const val EXTRA_MODE = "mode"
     }
 }
 

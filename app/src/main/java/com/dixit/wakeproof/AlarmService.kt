@@ -198,10 +198,11 @@ class AlarmService : Service() {
             this, 2001, open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val study = Prefs(this).mode == Prefs.MODE_STUDY
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notif)
-            .setContentTitle("Wake up — prove it")
-            .setContentText("Tap to start your push-ups")
+            .setContentTitle(if (study) "Desk time — show your Anki" else "Wake up — prove it")
+            .setContentText(if (study) "Tap when you're at your desk" else "Tap to start your push-ups")
             .setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOngoing(true)

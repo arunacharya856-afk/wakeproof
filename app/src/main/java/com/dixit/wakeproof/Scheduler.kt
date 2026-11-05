@@ -8,16 +8,16 @@ import android.os.Build
 import java.util.Calendar
 
 object Scheduler {
-    private const val REQ_ALARM = 1001
+    private const val REQ_WAKE = 1001
     private const val REQ_SHOW = 1002
+    private const val REQ_STUDY = 1003
 
-    fun nextTrigger(p: Prefs, now: Long = System.currentTimeMillis()): Long? {
-        val days = p.days
+    fun nextAt(days: Set<Int>, hour: Int, minute: Int, now: Long = System.currentTimeMillis()): Long? {
         if (days.isEmpty()) return null
         val cal = Calendar.getInstance().apply {
             timeInMillis = now
-            set(Calendar.HOUR_OF_DAY, p.hour)
-            set(Calendar.MINUTE, p.minute)
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
@@ -29,22 +29,22 @@ object Scheduler {
         return null
     }
 
-    private fun alarmIntent(ctx: Context): PendingIntent {
-        val i = Intent(ctx, AlarmReceiver::class.java).setAction(AlarmReceiver.ACTION_FIRE)
+    fun nextTrigger(p: Prefs): Long? = nextAt(p.days, p.hour, p.minute)
+
+    fun nextStudy(p: Prefs): Long? = nextAt(p.days, p.studyHour, p.studyMinute)
+
+    private fun alarmIntent(ctx: Context, mode: Int): PendingIntent {
+        val i = Intent(ctx, AlarmReceiver::class.java)
+            .setAction(AlarmReceiver.ACTION_FIRE + mode)
+            .putExtra(AlarmReceiver.EXTRA_MODE, mode)
         return PendingIntent.getBroadcast(
-            ctx, REQ_ALARM, i,
+            ctx, if (mode == Prefs.MODE_STUDY) REQ_STUDY else REQ_WAKE, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
 
-    /** Cancels any pending alarm and schedules the next one. Returns the trigger time, or null if off. */
-    fun scheduleNext(ctx: Context): Long? {
-        val p = Prefs(ctx)
+    private fun set(ctx: Context, t: Long, pi: PendingIntent) {
         val am = ctx.getSystemService(AlarmManager::class.java)
-        val pi = alarmIntent(ctx)
-        am.cancel(pi)
-        if (!p.enabled) return null
-        val t = nextTrigger(p) ?: return null
         val show = PendingIntent.getActivity(
             ctx, REQ_SHOW, Intent(ctx, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -54,6 +54,22 @@ object Scheduler {
         } catch (e: SecurityException) {
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, t, pi)
         }
+    }
+
+    /** Cancels and re-schedules both alarms. Returns the next wake-up time, or null if off. */
+    fun scheduleNext(ctx: Context): Long? {
+        val p = Prefs(ctx)
+        val am = ctx.getSystemService(AlarmManager::class.java)
+
+        val study = alarmIntent(ctx, Prefs.MODE_STUDY)
+        am.cancel(study)
+        if (p.studyEnabled) nextStudy(p)?.let { set(ctx, it, study) }
+
+        val wake = alarmIntent(ctx, Prefs.MODE_WAKE)
+        am.cancel(wake)
+        if (!p.enabled) return null
+        val t = nextTrigger(p) ?: return null
+        set(ctx, t, wake)
         return t
     }
 

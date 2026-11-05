@@ -54,6 +54,40 @@ class Prefs(ctx: Context) {
         get() = sp.getString("apiKey", "") ?: ""
         set(v) = edit { putString("apiKey", v) }
 
+    // ---- Desk check (Anki) ----
+    var studyEnabled: Boolean
+        get() = sp.getBoolean("studyEnabled", false)
+        set(v) = edit { putBoolean("studyEnabled", v) }
+    var studyHour: Int
+        get() = sp.getInt("studyHour", 6)
+        set(v) = edit { putInt("studyHour", v) }
+    var studyMinute: Int
+        get() = sp.getInt("studyMinute", 30)
+        set(v) = edit { putInt("studyMinute", v) }
+    var studyCards: Int
+        get() = sp.getInt("studyCards", 20)
+        set(v) = edit { putInt("studyCards", v) }
+    var studyQuietMin: Int
+        get() = sp.getInt("studyQuietMin", 20)
+        set(v) = edit { putInt("studyQuietMin", v) }
+    /** Desk check fired while the wake-up routine was still going; start it right after. */
+    var studyQueued: Boolean
+        get() = sp.getBoolean("studyQueued", false)
+        set(v) = edit { putBoolean("studyQueued", v) }
+    var studyStreak: Int
+        get() = sp.getInt("studyStreak", 0)
+        set(v) = edit { putInt("studyStreak", v) }
+    var studyLastDone: String
+        get() = sp.getString("studyLastDone", "") ?: ""
+        set(v) = edit { putString("studyLastDone", v) }
+
+    /** Which alarm is ringing: MODE_WAKE or MODE_STUDY. */
+    var mode: Int
+        get() = sp.getInt("mode", MODE_WAKE)
+        set(v) = edit { putInt("mode", v) }
+
+    val studyMs: Long get() = if (testMode) 2 * 60_000L else studyQuietMin * 60_000L
+
     // ---- Stats ----
     var streak: Int
         get() = sp.getInt("streak", 0)
@@ -91,7 +125,8 @@ class Prefs(ctx: Context) {
     val limitMs: Long get() = if (testMode) 3 * 60_000L else limitMin * 60_000L
     val idleMs: Long get() = idleSec * 1000L
 
-    fun resetChallenge(test: Boolean) = edit {
+    fun resetChallenge(test: Boolean, mode: Int = MODE_WAKE) = edit {
+        putInt("mode", mode)
         putInt("phase", 0)
         putInt("reps", 0)
         putLong("startedAt", 0L)
@@ -100,18 +135,25 @@ class Prefs(ctx: Context) {
         putString("photoUri", "")
     }
 
-    /** Updates the streak when a real (non-test) alarm is completed. */
+    /** Updates the right streak when a real (non-test) alarm is completed. */
     fun recordDone(): Int {
-        if (testMode) return streak
+        val study = mode == MODE_STUDY
+        val cur = if (study) studyStreak else streak
+        if (testMode) return cur
+        val last = if (study) studyLastDone else lastDone
         val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val cal = Calendar.getInstance()
         val today = fmt.format(cal.time)
-        if (lastDone == today) return streak
+        if (last == today) return cur
         cal.add(Calendar.DAY_OF_YEAR, -1)
         val yesterday = fmt.format(cal.time)
-        val newStreak = if (lastDone == yesterday) streak + 1 else 1
-        streak = newStreak
-        lastDone = today
-        return newStreak
+        val n = if (last == yesterday) cur + 1 else 1
+        if (study) { studyStreak = n; studyLastDone = today } else { streak = n; lastDone = today }
+        return n
+    }
+
+    companion object {
+        const val MODE_WAKE = 0
+        const val MODE_STUDY = 1
     }
 }

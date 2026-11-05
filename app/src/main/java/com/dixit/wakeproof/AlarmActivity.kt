@@ -82,7 +82,7 @@ class AlarmActivity : Activity(), SensorEventListener {
         lastActivityAt = System.currentTimeMillis()
 
         // If the app was restarted mid-check, go back to the photo step.
-        if (prefs.phase == PH_CHECK) prefs.phase = PH_BED
+        if (prefs.phase == PH_CHECK) prefs.phase = photoPhase()
 
         buildUi()
 
@@ -186,7 +186,7 @@ class AlarmActivity : Activity(), SensorEventListener {
 
         soundTv.text = when {
             phase == PH_DONE -> "Alarm off"
-            loud && phase == PH_IDLE -> "🔊 Ringing — tap Start to silence it"
+            loud && phase == PH_IDLE -> "🔊 Ringing — tap the button below to silence it"
             loud -> "🔊 Sound is back — keep going to quiet it"
             else -> "🔇 Quiet while you keep moving"
         }
@@ -196,6 +196,11 @@ class AlarmActivity : Activity(), SensorEventListener {
         altBtn.visibility = View.GONE
         actionBtn.visibility = View.VISIBLE
         bigTv.setTextColor(Ui.ACCENT)
+
+        if (isStudy()) {
+            renderStudy(phase, now)
+            return
+        }
 
         when (phase) {
             PH_IDLE -> {
@@ -260,6 +265,66 @@ class AlarmActivity : Activity(), SensorEventListener {
         }
     }
 
+    private fun isStudy() = prefs.mode == Prefs.MODE_STUDY
+
+    /** The step you return to after a failed photo check. */
+    private fun photoPhase() = if (isStudy()) PH_STUDY else PH_BED
+
+    private fun renderStudy(phase: Int, now: Long) {
+        val target = prefs.studyCards
+        when (phase) {
+            PH_IDLE -> {
+                titleTv.text = if (prefs.testMode) "Desk check test" else "Desk time 📚"
+                bigTv.textSize = 30f
+                bigTv.text = "$target Anki cards"
+                infoTv.text = "Sit down at your desk and tap the button. The sound stops while you study, " +
+                    "then photograph your Anki screen showing \"Studied N cards today\"."
+                timerTv.text = ""
+                actionBtn.text = "I'm at my desk"
+            }
+            PH_STUDY -> {
+                titleTv.text = "Do your cards"
+                bigTv.textSize = 30f
+                bigTv.text = "$target+ cards today"
+                infoTv.text = "When you're done, go to Anki's main Decks screen (or Stats) and photograph the " +
+                    "\"Studied … cards today\" line. Get close enough that it's readable." +
+                    if (prefs.apiKey.isBlank()) "\n\nNo AI key saved, so any fresh photo counts." else ""
+                val left = prefs.studyMs - (now - prefs.startedAt)
+                timerTv.text = if (left > 0) "${fmtLeft(left)} of quiet left"
+                else "⏰ Quiet time is up — rings until your Anki photo passes"
+                actionBtn.text = "📷  Photo of Anki screen"
+                if (netFails >= 2) {
+                    altBtn.visibility = View.VISIBLE
+                    altBtn.text = "Can't reach the AI — accept without check"
+                }
+            }
+            PH_CHECK -> {
+                titleTv.text = "Reading your Anki screen…"
+                bigTv.textSize = 26f
+                bigTv.text = "🤔"
+                infoTv.text = "Hang on a few seconds."
+                timerTv.text = ""
+                actionBtn.visibility = View.GONE
+            }
+            PH_DONE -> {
+                titleTv.text = "Studying. Nice."
+                bigTv.textSize = 40f
+                bigTv.setTextColor(Ui.GOOD)
+                bigTv.text = if (prefs.testMode) "Test passed ✅" else "📚 ${prefs.studyStreak}-day desk streak"
+                infoTv.text = "Alarm off. Keep going."
+                timerTv.text = ""
+                actionBtn.text = "Close"
+            }
+        }
+    }
+
+    private fun startStudy() {
+        prefs.startedAt = System.currentTimeMillis()
+        prefs.phase = PH_STUDY
+        updateSound()
+        render()
+    }
+
     private fun fmtLeft(ms: Long): String {
         val s = (ms / 1000).coerceAtLeast(0)
         return "%d:%02d".format(s / 60, s % 60)
@@ -274,6 +339,7 @@ class AlarmActivity : Activity(), SensorEventListener {
         val quiet = when (prefs.phase) {
             PH_PUSH -> !overLimit && now - lastActivityAt < prefs.idleMs
             PH_BED -> !overLimit && now - prefs.bedStartedAt < prefs.bedMs
+            PH_STUDY -> now - prefs.startedAt < prefs.studyMs
             PH_CHECK -> true
             else -> false
         }
@@ -285,14 +351,14 @@ class AlarmActivity : Activity(), SensorEventListener {
 
     private fun onAction() {
         when (prefs.phase) {
-            PH_IDLE -> startPushups()
-            PH_BED -> takePhoto()
+            PH_IDLE -> if (isStudy()) startStudy() else startPushups()
+            PH_BED, PH_STUDY -> takePhoto()
             PH_DONE -> finishAndRemoveTask()
         }
     }
 
     private fun onAlt() {
-        if (prefs.phase == PH_BED && netFails >= 2) complete()
+        if ((prefs.phase == PH_BED || prefs.phase == PH_STUDY) && netFails >= 2) complete()
     }
 
     private fun startPushups() {
@@ -317,8 +383,17 @@ class AlarmActivity : Activity(), SensorEventListener {
     }
 
     private fun complete() {
-        prefs.phase = PH_DONE
         prefs.recordDone()
+        netFails = 0
+        // Desk time already arrived during the wake-up routine: go straight into the study window.
+        if (!isStudy() && prefs.studyQueued) {
+            prefs.studyQueued = false
+            prefs.resetChallenge(test = false, mode = Prefs.MODE_STUDY)
+            Toast.makeText(this, "Wake-up done ✅ — desk time already started", Toast.LENGTH_LONG).show()
+            startStudy()
+            return
+        }
+        prefs.phase = PH_DONE
         prefs.ringing = false
         AlarmService.command(this, AlarmService.ACTION_STOP)
         render()
@@ -441,11 +516,14 @@ class AlarmActivity : Activity(), SensorEventListener {
         prefs.phase = PH_CHECK
         render()
         val key = prefs.apiKey
+        val study = isStudy()
+        val target = prefs.studyCards
         Thread {
             val bmp = BedChecker.loadBitmap(this, uri)
             val result: BedChecker.Result = when {
                 bmp == null -> BedChecker.Result.Failed("Photo was empty")
                 key.isBlank() -> BedChecker.Result.Made // No API key: any fresh photo counts.
+                study -> BedChecker.checkAnki(key, bmp, target)
                 else -> BedChecker.check(key, bmp)
             }
             deletePhoto(uri)
@@ -458,12 +536,12 @@ class AlarmActivity : Activity(), SensorEventListener {
         when (result) {
             is BedChecker.Result.Made -> complete()
             is BedChecker.Result.NotMade -> {
-                prefs.phase = PH_BED
+                prefs.phase = photoPhase()
                 Toast.makeText(this, "Not yet: ${result.reason}", Toast.LENGTH_LONG).show()
                 infoTv.text = "Not yet: ${result.reason}"
             }
             is BedChecker.Result.Failed -> {
-                prefs.phase = PH_BED
+                prefs.phase = photoPhase()
                 if (!emptyPhoto) netFails++
                 Toast.makeText(this, "Check failed: ${result.message}", Toast.LENGTH_LONG).show()
             }
@@ -481,6 +559,7 @@ class AlarmActivity : Activity(), SensorEventListener {
         const val PH_BED = 2
         const val PH_CHECK = 3
         const val PH_DONE = 4
+        const val PH_STUDY = 5
         const val REQ_PHOTO = 42
     }
 }

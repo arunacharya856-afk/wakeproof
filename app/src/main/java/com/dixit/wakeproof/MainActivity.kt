@@ -52,6 +52,12 @@ class MainActivity : Activity() {
     private lateinit var permBox: LinearLayout
     private lateinit var saveBtn: Button
     private lateinit var scroll: ScrollView
+    private var studyHour = 6
+    private var studyMinute = 30
+    private lateinit var studySw: Switch
+    private lateinit var studyTimeBtn: Button
+    private lateinit var studyCardsEt: EditText
+    private lateinit var studyQuietEt: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,6 +68,8 @@ class MainActivity : Activity() {
         hour = prefs.hour
         minute = prefs.minute
         selectedDays.addAll(prefs.days)
+        studyHour = prefs.studyHour
+        studyMinute = prefs.studyMinute
         buildUi()
         Scheduler.scheduleNext(this)
     }
@@ -128,6 +136,33 @@ class MainActivity : Activity() {
         routine.addView(row("Total quiet time limit (minutes)", limitEt), Ui.lp(this, 8))
         col.addView(routine, Ui.lp(this, 12))
 
+        // Desk check card
+        val desk = Ui.card(this)
+        studySw = Switch(this).apply {
+            text = "Desk check (Anki proof)"
+            textSize = 18f
+            setTextColor(Ui.TEXT)
+            isChecked = prefs.studyEnabled
+        }
+        desk.addView(studySw)
+        desk.addView(
+            Ui.text(
+                this,
+                "A second alarm on the same days. It only stops when you photograph your Anki screen " +
+                    "showing enough cards studied today.",
+                14f, Ui.MUTED
+            ),
+            Ui.lp(this, 6)
+        )
+        studyTimeBtn = Ui.button(this, "", Ui.ACCENT) { pickStudyTime() }
+        studyTimeBtn.textSize = 24f
+        desk.addView(studyTimeBtn, Ui.lp(this, 12))
+        studyCardsEt = numberField(prefs.studyCards)
+        desk.addView(row("Cards studied today", studyCardsEt), Ui.lp(this, 10))
+        studyQuietEt = numberField(prefs.studyQuietMin)
+        desk.addView(row("Quiet minutes to do them", studyQuietEt), Ui.lp(this, 8))
+        col.addView(desk, Ui.lp(this, 12))
+
         // Sound card
         val sound = Ui.card(this)
         sound.addView(Ui.text(this, "Sound", 18f, Ui.TEXT, true))
@@ -171,6 +206,10 @@ class MainActivity : Activity() {
             Ui.button(this, "Test alarm now (3 push-ups)", Ui.CARD, Ui.TEXT) { confirmTest() },
             Ui.lp(this, 10)
         )
+        col.addView(
+            Ui.button(this, "Test desk check now (Anki photo)", Ui.CARD, Ui.TEXT) { confirmStudyTest() },
+            Ui.lp(this, 10)
+        )
 
         scroll = ScrollView(this).apply {
             setBackgroundColor(Ui.BG)
@@ -178,6 +217,43 @@ class MainActivity : Activity() {
         }
         setContentView(scroll)
         updateTimeButton()
+        updateStudyTimeButton()
+    }
+
+    private fun pickStudyTime() {
+        TimePickerDialog(this, { _, h, m ->
+            studyHour = h
+            studyMinute = m
+            updateStudyTimeButton()
+            studySw.isChecked = true
+            save(showToast = true)
+        }, studyHour, studyMinute, false).show()
+    }
+
+    private fun updateStudyTimeButton() {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, studyHour)
+            set(Calendar.MINUTE, studyMinute)
+        }
+        studyTimeBtn.text = "At desk by " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(cal.time)
+    }
+
+    private fun confirmStudyTest() {
+        AlertDialog.Builder(this)
+            .setTitle("Test the desk check?")
+            .setMessage(
+                "It will ring now. Tap \"I'm at my desk\", then photograph your Anki screen. " +
+                    "It stops once ${prefs.studyCards}+ cards studied today are shown (2 quiet minutes in test mode)."
+            )
+            .setPositiveButton("Start test") { _, _ ->
+                save(showToast = false)
+                prefs.resetChallenge(test = true, mode = Prefs.MODE_STUDY)
+                prefs.ringing = true
+                AlarmService.start(this)
+                startActivity(Intent(this, AlarmActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     /** Saves, hides the keyboard, and makes it obvious that it worked. */
@@ -290,6 +366,13 @@ class MainActivity : Activity() {
         prefs.rampUp = rampSw.isChecked
         prefs.vibrateOnly = vibOnlySw.isChecked
         prefs.apiKey = keyEt.text.toString().trim()
+        prefs.studyEnabled = studySw.isChecked
+        prefs.studyHour = studyHour
+        prefs.studyMinute = studyMinute
+        prefs.studyCards = studyCardsEt.intOr(20).coerceIn(1, 1000)
+        prefs.studyQuietMin = studyQuietEt.intOr(20).coerceIn(5, 120)
+        studyCardsEt.setText(prefs.studyCards.toString())
+        studyQuietEt.setText(prefs.studyQuietMin.toString())
         pushupsEt.setText(prefs.pushups.toString())
         bedEt.setText(prefs.bedMin.toString())
         idleEt.setText(prefs.idleSec.toString())
@@ -312,9 +395,13 @@ class MainActivity : Activity() {
 
     private fun refreshStatus() {
         val t = if (prefs.enabled) Scheduler.nextTrigger(prefs) else null
-        statusTv.text = if (t != null) "⏰ Next alarm: ${fmtTime(t)}" else "Alarm is off"
+        val st = if (prefs.studyEnabled) Scheduler.nextStudy(prefs) else null
+        statusTv.text = (if (t != null) "⏰ Next alarm: ${fmtTime(t)}" else "Wake-up alarm is off") +
+            (if (st != null) "\n📚 Next desk check: ${fmtTime(st)}" else "")
         val s = prefs.streak
-        streakTv.text = if (s > 0) "🔥 Streak: $s day${if (s == 1) "" else "s"}" else "Finish your first morning to start a streak."
+        val ds = prefs.studyStreak
+        streakTv.text = (if (s > 0) "🔥 Wake streak: $s day${if (s == 1) "" else "s"}" else "Finish your first morning to start a streak.") +
+            (if (ds > 0) "\n📚 Desk streak: $ds day${if (ds == 1) "" else "s"}" else "")
     }
 
     private fun confirmTest() {
