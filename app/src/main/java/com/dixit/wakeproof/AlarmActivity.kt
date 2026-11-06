@@ -332,7 +332,7 @@ class AlarmActivity : ComponentActivity(), SensorEventListener {
                 titleTv.text = "Checking your bed…"
                 bigTv.textSize = 26f
                 bigTv.text = "🤔"
-                infoTv.text = "Hang on a few seconds."
+                infoTv.text = "Usually a few seconds, up to a minute on a slow connection."
                 timerTv.text = ""
                 actionBtn.visibility = View.GONE
             }
@@ -388,7 +388,7 @@ class AlarmActivity : ComponentActivity(), SensorEventListener {
                 titleTv.text = "Checking your selfie…"
                 bigTv.textSize = 26f
                 bigTv.text = "🤔"
-                infoTv.text = "Hang on a few seconds."
+                infoTv.text = "Usually a few seconds, up to a minute on a slow connection."
                 timerTv.text = ""
                 actionBtn.visibility = View.GONE
             }
@@ -436,7 +436,7 @@ class AlarmActivity : ComponentActivity(), SensorEventListener {
                 titleTv.text = "Reading your Anki screen…"
                 bigTv.textSize = 26f
                 bigTv.text = "🤔"
-                infoTv.text = "Hang on a few seconds."
+                infoTv.text = "Usually a few seconds, up to a minute on a slow connection."
                 timerTv.text = ""
                 actionBtn.visibility = View.GONE
             }

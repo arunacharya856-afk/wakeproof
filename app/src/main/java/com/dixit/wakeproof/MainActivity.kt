@@ -210,6 +210,7 @@ class MainActivity : Activity() {
             isSingleLine = true
         }
         ai.addView(keyEt, Ui.lp(this, 6))
+        ai.addView(Ui.button(this, "Test AI key", Ui.BG, Ui.TEXT) { testKey() }, Ui.lp(this, 10))
         col.addView(ai, Ui.lp(this, 12))
 
         saveBtn = Ui.button(this, "Save") { onSaveTapped() }
@@ -248,6 +249,25 @@ class MainActivity : Activity() {
             set(Calendar.MINUTE, studyMinute)
         }
         studyTimeBtn.text = "At desk by " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(cal.time)
+    }
+
+    private fun testKey() {
+        save(showToast = false)
+        val dlg = AlertDialog.Builder(this)
+            .setTitle("Testing your AI key…")
+            .setMessage("Trying each model. This can take up to a minute.")
+            .setPositiveButton("OK", null)
+            .show()
+        val key = prefs.apiKey
+        Thread {
+            val report = BedChecker.testKey(key)
+            runOnUiThread {
+                if (dlg.isShowing) {
+                    dlg.setTitle("AI key test")
+                    dlg.setMessage(report)
+                }
+            }
+        }.start()
     }
 
     private fun confirmLibrary() {

@@ -48,7 +48,7 @@ object BedChecker {
 
     /** Is this a selfie at a library? */
     fun checkLibrary(apiKey: String, bmp: Bitmap): Result {
-        val (json, err) = ask(apiKey, bmp, LIBRARY_PROMPT, maxSide = 1024)
+        val (json, err) = ask(apiKey, bmp, LIBRARY_PROMPT, maxSide = 768)
         if (json == null) return Result.Failed(err ?: "No answer")
         return if (json.optBoolean("ok", false)) Result.Made
         else Result.NotMade(json.optString("reason", "Doesn't look like a library"))
@@ -75,7 +75,7 @@ object BedChecker {
 
     /** Is the bed made? */
     fun check(apiKey: String, bmp: Bitmap): Result {
-        val (json, err) = ask(apiKey, bmp, BED_PROMPT, maxSide = 1024)
+        val (json, err) = ask(apiKey, bmp, BED_PROMPT, maxSide = 768)
         if (json == null) return Result.Failed(err ?: "No answer")
         return if (json.optBoolean("made", false)) Result.Made
         else Result.NotMade(json.optString("reason", "Bed doesn't look made yet"))
@@ -130,35 +130,57 @@ object BedChecker {
     @Volatile private var workingGemini: String? = null
 
     private fun askGemini(apiKey: String, b64: String, prompt: String): Pair<String?, String?> {
+        val parts = JSONArray()
+            .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", b64)))
+            .put(JSONObject().put("text", prompt))
+        return askGeminiAny(apiKey, parts, maxTotalMs = 75_000)
+    }
+
+    /** Tries models in order (last working one first) until one answers or time runs out. */
+    private fun askGeminiAny(apiKey: String, parts: JSONArray, maxTotalMs: Long): Pair<String?, String?> {
+        val started = System.currentTimeMillis()
         val order = listOfNotNull(workingGemini) + GEMINI_MODELS.filter { it != workingGemini }
         var lastErr: String? = null
         for (model in order) {
-            val (text, err, retry) = askGeminiModel(apiKey, b64, prompt, model)
-            if (text != null) {
+            if (System.currentTimeMillis() - started > maxTotalMs) break
+            val r = askGeminiModel(apiKey, parts, model)
+            if (r.text != null) {
                 workingGemini = model
-                return text to null
+                return r.text to null
             }
-            lastErr = err
-            if (!retry) break
+            lastErr = r.error
+            if (!r.retry) break
         }
         return null to lastErr
     }
 
-    /** Returns (answer, error, worthTryingAnotherModel). */
-    private fun askGeminiModel(apiKey: String, b64: String, prompt: String, model: String): Triple<String?, String?, Boolean> {
+    class GemResult(val text: String?, val error: String?, val retry: Boolean, val code: Int, val ms: Long)
+
+    /** One model; asks for minimal "thinking" so it answers fast, and drops that setting if the model rejects it. */
+    private fun askGeminiModel(apiKey: String, parts: JSONArray, model: String): GemResult {
+        val first = askGeminiOnce(apiKey, parts, model, lowThinking = true)
+        if (first.code == 400 && first.error?.contains("think", ignoreCase = true) == true) {
+            return askGeminiOnce(apiKey, parts, model, lowThinking = false)
+        }
+        return first
+    }
+
+    private fun askGeminiOnce(apiKey: String, parts: JSONArray, model: String, lowThinking: Boolean): GemResult {
+        val t0 = System.currentTimeMillis()
+        fun r(text: String?, err: String?, retry: Boolean, code: Int) =
+            GemResult(text, err, retry, code, System.currentTimeMillis() - t0)
         return try {
-            val parts = JSONArray()
-                .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", b64)))
-                .put(JSONObject().put("text", prompt))
+            val gen = JSONObject().put("responseMimeType", "application/json")
+            if (lowThinking) gen.put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))
             val body = JSONObject()
                 .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
-                .put("generationConfig", JSONObject().put("responseMimeType", "application/json"))
+                .put("generationConfig", gen)
 
             val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
                 .openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
-            conn.connectTimeout = 15000
-            conn.readTimeout = 45000
+            conn.connectTimeout = 10000
+            conn.readTimeout = 20000
             conn.doOutput = true
             conn.setRequestProperty("content-type", "application/json")
             conn.setRequestProperty("x-goog-api-key", apiKey)
@@ -176,22 +198,74 @@ object BedChecker {
                 val hint = if (code == 429) " (free limit reached — try again in a minute)" else ""
                 // 400 "API key not valid" won't be fixed by another model; most other errors might be.
                 val badKey = code == 400 && msg.contains("API key", ignoreCase = true)
-                return Triple(null, "Gemini error $code$hint ($model): ${msg.take(140)}".trim(), !badKey)
+                return r(null, "Gemini error $code$hint ($model): ${msg.take(140)}".trim(), !badKey, code)
             }
 
             val cands = JSONObject(text).optJSONArray("candidates")
-                ?: return Triple(null, "Gemini gave no answer ($model)", true)
+                ?: return r(null, "Gemini gave no answer ($model)", true, code)
             val ps = cands.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
-                ?: return Triple(null, "Gemini gave no answer ($model)", true)
+                ?: return r(null, "Gemini gave no answer ($model)", true, code)
             val sb = StringBuilder()
             for (i in 0 until ps.length()) {
                 val p = ps.getJSONObject(i)
                 if (!p.optBoolean("thought", false)) sb.append(p.optString("text"))
             }
-            Triple(sb.toString(), null, false)
+            r(sb.toString(), null, false, code)
+        } catch (e: java.net.SocketTimeoutException) {
+            // This model is too slow right now: try the next one.
+            r(null, "Timed out waiting for $model", true, -1)
+        } catch (e: java.net.UnknownHostException) {
+            r(null, "No internet connection", false, -2)
         } catch (e: Exception) {
-            // Network problem: another model won't help.
-            Triple(null, "No connection: ${e.message ?: e.javaClass.simpleName}", false)
+            r(null, "Connection problem ($model): ${e.message ?: e.javaClass.simpleName}", true, -3)
+        }
+    }
+
+    /** Quick text-only test of the key against each model, for the settings screen. */
+    fun testKey(apiKey: String): String {
+        val key = apiKey.trim()
+        if (key.isBlank()) return "No key saved."
+        if (!isGemini(key)) {
+            val (text, err) = askClaudeText(key)
+            return if (text != null) "✅ Claude key works." else "❌ Claude: $err"
+        }
+        val parts = JSONArray().put(JSONObject().put("text", "Reply with only this JSON: {\"ok\": true}"))
+        val sb = StringBuilder()
+        for (model in GEMINI_MODELS) {
+            val res = askGeminiModel(key, parts, model)
+            if (res.text != null) {
+                workingGemini = model
+                sb.append("✅ $model answered in ${res.ms / 1000.0}s — the app will use this one.\n")
+                return sb.toString().trim()
+            }
+            sb.append("❌ $model (${res.ms / 1000.0}s): ${res.error}\n")
+            if (!res.retry) break
+        }
+        sb.append("\nNo model worked. Screenshot this and send it to Claude.")
+        return sb.toString().trim()
+    }
+
+    private fun askClaudeText(apiKey: String): Pair<String?, String?> {
+        return try {
+            val body = JSONObject()
+                .put("model", MODEL)
+                .put("max_tokens", 20)
+                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "Say ok")))
+            val conn = URL("https://api.anthropic.com/v1/messages").openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 10000
+            conn.readTimeout = 20000
+            conn.doOutput = true
+            conn.setRequestProperty("content-type", "application/json")
+            conn.setRequestProperty("x-api-key", apiKey)
+            conn.setRequestProperty("anthropic-version", "2023-06-01")
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
+            conn.disconnect()
+            if (code in 200..299) "ok" to null else null to "error $code ${text.take(140)}"
+        } catch (e: Exception) {
+            null to (e.message ?: e.javaClass.simpleName)
         }
     }
 
