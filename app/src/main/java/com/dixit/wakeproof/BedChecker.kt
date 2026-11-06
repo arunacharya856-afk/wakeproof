@@ -119,20 +119,42 @@ object BedChecker {
         }
     }
 
+    /**
+     * Google retires Gemini models often (and new "AQ." keys reject retired ones), so try current
+     * models in order and remember the first one that works.
+     */
+    private val GEMINI_MODELS = listOf(
+        "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.8-flash",
+        "gemini-flash-latest", "gemini-3.5-flash-lite", GEMINI_MODEL
+    )
+    @Volatile private var workingGemini: String? = null
+
     private fun askGemini(apiKey: String, b64: String, prompt: String): Pair<String?, String?> {
+        val order = listOfNotNull(workingGemini) + GEMINI_MODELS.filter { it != workingGemini }
+        var lastErr: String? = null
+        for (model in order) {
+            val (text, err, retry) = askGeminiModel(apiKey, b64, prompt, model)
+            if (text != null) {
+                workingGemini = model
+                return text to null
+            }
+            lastErr = err
+            if (!retry) break
+        }
+        return null to lastErr
+    }
+
+    /** Returns (answer, error, worthTryingAnotherModel). */
+    private fun askGeminiModel(apiKey: String, b64: String, prompt: String, model: String): Triple<String?, String?, Boolean> {
         return try {
             val parts = JSONArray()
                 .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", b64)))
                 .put(JSONObject().put("text", prompt))
             val body = JSONObject()
                 .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
-                .put(
-                    "generationConfig", JSONObject()
-                        .put("responseMimeType", "application/json")
-                        .put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
-                )
+                .put("generationConfig", JSONObject().put("responseMimeType", "application/json"))
 
-            val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/$GEMINI_MODEL:generateContent")
+            val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
                 .openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
             conn.connectTimeout = 15000
@@ -152,17 +174,24 @@ object BedChecker {
                     JSONObject(text).optJSONObject("error")?.optString("message") ?: ""
                 } catch (e: Exception) { "" }
                 val hint = if (code == 429) " (free limit reached — try again in a minute)" else ""
-                return null to "Gemini error $code$hint ${msg.take(100)}".trim()
+                // 400 "API key not valid" won't be fixed by another model; most other errors might be.
+                val badKey = code == 400 && msg.contains("API key", ignoreCase = true)
+                return Triple(null, "Gemini error $code$hint ($model): ${msg.take(140)}".trim(), !badKey)
             }
 
-            val cands = JSONObject(text).optJSONArray("candidates") ?: return null to "Gemini gave no answer"
+            val cands = JSONObject(text).optJSONArray("candidates")
+                ?: return Triple(null, "Gemini gave no answer ($model)", true)
             val ps = cands.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
-                ?: return null to "Gemini gave no answer"
+                ?: return Triple(null, "Gemini gave no answer ($model)", true)
             val sb = StringBuilder()
-            for (i in 0 until ps.length()) sb.append(ps.getJSONObject(i).optString("text"))
-            sb.toString() to null
+            for (i in 0 until ps.length()) {
+                val p = ps.getJSONObject(i)
+                if (!p.optBoolean("thought", false)) sb.append(p.optString("text"))
+            }
+            Triple(sb.toString(), null, false)
         } catch (e: Exception) {
-            null to (e.message ?: e.javaClass.simpleName)
+            // Network problem: another model won't help.
+            Triple(null, "No connection: ${e.message ?: e.javaClass.simpleName}", false)
         }
     }
 

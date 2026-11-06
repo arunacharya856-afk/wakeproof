@@ -1,7 +1,10 @@
 package com.dixit.wakeproof
 
-import android.app.Activity
+import android.Manifest
 import android.app.KeyguardManager
+import android.content.pm.PackageManager
+import androidx.activity.ComponentActivity
+import androidx.camera.view.PreviewView
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ContentValues
@@ -37,7 +40,7 @@ import java.util.Locale
 /**
  * The wake-up screen: Start -> push-ups (counted with the proximity sensor) -> make bed -> photo check -> done.
  */
-class AlarmActivity : Activity(), SensorEventListener {
+class AlarmActivity : ComponentActivity(), SensorEventListener {
 
     private lateinit var prefs: Prefs
     private val handler = Handler(Looper.getMainLooper())
@@ -59,6 +62,14 @@ class AlarmActivity : Activity(), SensorEventListener {
     private lateinit var tapPad: TextView
     private lateinit var actionBtn: Button
     private lateinit var altBtn: Button
+    private lateinit var previewView: PreviewView
+    private lateinit var camTv: TextView
+    private var counter: PushupCounter? = null
+    /** Camera refused or broken: fall back to tapping. */
+    private var camUnavailable = false
+    /** Result of the last photo check, kept on screen until the next one. */
+    private var lastMsg: String? = null
+    private lateinit var resultTv: TextView
 
     private val tick = object : Runnable {
         override fun run() {
@@ -89,6 +100,49 @@ class AlarmActivity : Activity(), SensorEventListener {
         if (!prefs.ringing && prefs.phase != PH_DONE) {
             finish()
             return
+        }
+        if (prefs.phase == PH_PUSH && !isStudy() && !isLib()) startCounter()
+        render()
+    }
+
+    override fun onDestroy() {
+        counter?.stop()
+        super.onDestroy()
+    }
+
+    private fun hasCamera() = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    private fun startCounter() {
+        if (!hasCamera()) {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQ_CAM)
+            return
+        }
+        if (counter == null) {
+            counter = PushupCounter(
+                this, previewView,
+                onRep = { onRepSignal(minGapMs = 900) },
+                onStatus = { camTv.text = it },
+                onError = { msg ->
+                    camUnavailable = true
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                    render()
+                }
+            )
+        }
+        counter?.start()
+    }
+
+    private fun stopCounter() {
+        counter?.stop()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_CAM) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            if (prefs.phase == PH_PUSH) startCounter()
+        } else {
+            camUnavailable = true
         }
         render()
     }
@@ -150,9 +204,25 @@ class AlarmActivity : Activity(), SensorEventListener {
         card.addView(bigTv, Ui.lp(this, 14))
         card.addView(infoTv, Ui.lp(this, 12))
         card.addView(timerTv, Ui.lp(this, 12))
+        resultTv = Ui.text(this, "", 15f, Ui.BAD, true).apply { setTextIsSelectable(true) }
+        card.addView(resultTv, Ui.lp(this, 12))
         col.addView(card, Ui.lp(this, 28))
 
-        tapPad = Ui.text(this, "TAP HERE WITH YOUR NOSE\n(at the bottom of each push-up)", 18f, Ui.DARK_TEXT, true).apply {
+        previewView = PreviewView(this).apply {
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            visibility = View.GONE
+        }
+        col.addView(previewView, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(this, 220)
+        ).apply { topMargin = Ui.dp(this@AlarmActivity, 14) })
+        camTv = Ui.text(this, "", 14f, Ui.MUTED).apply {
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+        }
+        col.addView(camTv, Ui.lp(this, 6))
+
+        tapPad =Ui.text(this, "TAP HERE WITH YOUR NOSE\n(at the bottom of each push-up)", 18f, Ui.DARK_TEXT, true).apply {
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 cornerRadius = Ui.dp(this@AlarmActivity, 22).toFloat()
@@ -194,7 +264,12 @@ class AlarmActivity : Activity(), SensorEventListener {
         }
         soundTv.setTextColor(if (loud && phase != PH_DONE) Ui.BAD else Ui.MUTED)
 
+        val showResult = lastMsg != null && phase != PH_DONE && phase != PH_CHECK
+        resultTv.text = if (showResult) lastMsg else ""
+        resultTv.visibility = if (showResult) View.VISIBLE else View.GONE
         tapPad.visibility = View.GONE
+        previewView.visibility = View.GONE
+        camTv.visibility = View.GONE
         altBtn.visibility = View.GONE
         actionBtn.visibility = View.VISIBLE
         bigTv.setTextColor(Ui.ACCENT)
@@ -222,11 +297,13 @@ class AlarmActivity : Activity(), SensorEventListener {
                 titleTv.text = "Push-ups"
                 bigTv.textSize = 64f
                 bigTv.text = "${prefs.reps} / ${prefs.target}"
-                if (proximity != null) {
-                    infoTv.text = "Put the phone face-up on the floor under your face. " +
-                        "Each time your face gets close to the top of the screen = 1 rep."
+                if (!camUnavailable) {
+                    infoTv.text = "Lay the phone face-up under your face, top of the phone pointing the same " +
+                        "way as your head. Keep your face in the preview — going down close to the phone = 1 rep."
+                    previewView.visibility = View.VISIBLE
+                    camTv.visibility = View.VISIBLE
                 } else {
-                    infoTv.text = "No proximity sensor found, so tap the pad with your nose at the bottom of each rep."
+                    infoTv.text = "Camera isn't available, so tap the pad with your nose at the bottom of each rep."
                     tapPad.visibility = View.VISIBLE
                 }
                 val idleLeft = (prefs.idleMs - (now - lastActivityAt)) / 1000
@@ -434,12 +511,14 @@ class AlarmActivity : Activity(), SensorEventListener {
         lastActivityAt = now
         wasFar = true
         registerSensor()
+        startCounter()
         updateSound()
         render()
     }
 
     private fun startBed() {
         unregisterSensor()
+        stopCounter()
         prefs.bedStartedAt = System.currentTimeMillis()
         prefs.phase = PH_BED
         buzz(250)
@@ -484,7 +563,7 @@ class AlarmActivity : Activity(), SensorEventListener {
         if (event.sensor.type != Sensor.TYPE_PROXIMITY) return
         val near = event.values[0] < event.sensor.maximumRange
         if (near) {
-            if (wasFar) onRepSignal(minGapMs = 600)
+            if (wasFar) onRepSignal(minGapMs = 900)
             wasFar = false
         } else {
             wasFar = true
@@ -608,16 +687,18 @@ class AlarmActivity : Activity(), SensorEventListener {
     private fun onCheckResult(result: BedChecker.Result, emptyPhoto: Boolean) {
         if (isFinishing) return
         when (result) {
-            is BedChecker.Result.Made -> complete()
+            is BedChecker.Result.Made -> {
+                lastMsg = null
+                complete()
+            }
             is BedChecker.Result.NotMade -> {
                 prefs.phase = photoPhase()
-                Toast.makeText(this, "Not yet: ${result.reason}", Toast.LENGTH_LONG).show()
-                infoTv.text = "Not yet: ${result.reason}"
+                lastMsg = "❌ Not yet: ${result.reason}"
             }
             is BedChecker.Result.Failed -> {
                 prefs.phase = photoPhase()
                 if (!emptyPhoto) netFails++
-                Toast.makeText(this, "Check failed: ${result.message}", Toast.LENGTH_LONG).show()
+                lastMsg = "⚠️ Check failed: ${result.message}"
             }
         }
         render()
@@ -635,5 +716,6 @@ class AlarmActivity : Activity(), SensorEventListener {
         const val PH_DONE = 4
         const val PH_STUDY = 5
         const val REQ_PHOTO = 42
+        const val REQ_CAM = 43
     }
 }

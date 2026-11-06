@@ -49,3 +49,15 @@ android {
         abortOnError = false
     }
 }
+
+dependencies {
+    implementation("androidx.activity:activity-ktx:1.9.3")
+    implementation("androidx.core:core-ktx:1.13.1")
+    val camerax = "1.4.1"
+    implementation("androidx.camera:camera-core:$camerax")
+    implementation("androidx.camera:camera-camera2:$camerax")
+    implementation("androidx.camera:camera-lifecycle:$camerax")
+    implementation("androidx.camera:camera-view:$camerax")
+    // Face detection that runs on the phone (bundled model, works offline).
+    implementation("com.google.mlkit:face-detection:16.1.7")
+}
