@@ -52,10 +52,9 @@ class MainActivity : Activity() {
     private lateinit var permBox: LinearLayout
     private lateinit var saveBtn: Button
     private lateinit var scroll: ScrollView
-    private var studyHour = 6
-    private var studyMinute = 30
     private lateinit var studySw: Switch
-    private lateinit var studyTimeBtn: Button
+    private lateinit var studyTimeTv: TextView
+    private lateinit var studyOffsetEt: EditText
     private lateinit var studyCardsEt: EditText
     private lateinit var studyQuietEt: EditText
     private lateinit var libEt: EditText
@@ -69,8 +68,6 @@ class MainActivity : Activity() {
         hour = prefs.hour
         minute = prefs.minute
         selectedDays.addAll(prefs.days)
-        studyHour = prefs.studyHour
-        studyMinute = prefs.studyMinute
         buildUi()
         Scheduler.scheduleNext(this)
     }
@@ -166,9 +163,10 @@ class MainActivity : Activity() {
             ),
             Ui.lp(this, 6)
         )
-        studyTimeBtn = Ui.button(this, "", Ui.ACCENT) { pickStudyTime() }
-        studyTimeBtn.textSize = 24f
-        desk.addView(studyTimeBtn, Ui.lp(this, 12))
+        studyOffsetEt = numberField(prefs.studyOffsetMin)
+        desk.addView(row("Minutes after wake-up alarm", studyOffsetEt), Ui.lp(this, 10))
+        studyTimeTv = Ui.text(this, "", 20f, Ui.ACCENT, true)
+        desk.addView(studyTimeTv, Ui.lp(this, 8))
         studyCardsEt = numberField(prefs.studyCards)
         desk.addView(row("Cards studied today", studyCardsEt), Ui.lp(this, 10))
         studyQuietEt = numberField(prefs.studyQuietMin)
@@ -233,22 +231,12 @@ class MainActivity : Activity() {
         updateStudyTimeButton()
     }
 
-    private fun pickStudyTime() {
-        TimePickerDialog(this, { _, h, m ->
-            studyHour = h
-            studyMinute = m
-            updateStudyTimeButton()
-            studySw.isChecked = true
-            save(showToast = true)
-        }, studyHour, studyMinute, false).show()
-    }
-
     private fun updateStudyTimeButton() {
         val cal = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, studyHour)
-            set(Calendar.MINUTE, studyMinute)
+            set(Calendar.HOUR_OF_DAY, prefs.studyHour)
+            set(Calendar.MINUTE, prefs.studyMinute)
         }
-        studyTimeBtn.text = "At desk by " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(cal.time)
+        studyTimeTv.text = "→ At desk by " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(cal.time)
     }
 
     private fun testKey() {
@@ -419,8 +407,8 @@ class MainActivity : Activity() {
         prefs.vibrateOnly = vibOnlySw.isChecked
         prefs.apiKey = keyEt.text.toString().trim()
         prefs.studyEnabled = studySw.isChecked
-        prefs.studyHour = studyHour
-        prefs.studyMinute = studyMinute
+        prefs.studyOffsetMin = studyOffsetEt.intOr(30).coerceIn(5, 240)
+        studyOffsetEt.setText(prefs.studyOffsetMin.toString())
         prefs.studyCards = studyCardsEt.intOr(20).coerceIn(1, 1000)
         prefs.studyQuietMin = studyQuietEt.intOr(20).coerceIn(5, 120)
         prefs.libMin = libEt.intOr(20).coerceIn(3, 90)
@@ -449,6 +437,7 @@ class MainActivity : Activity() {
 
     private fun refreshStatus() {
         val t = if (prefs.enabled) Scheduler.nextTrigger(prefs) else null
+        updateStudyTimeButton()
         val st = if (prefs.studyEnabled) Scheduler.nextStudy(prefs) else null
         statusTv.text = (if (t != null) "⏰ Next alarm: ${fmtTime(t)}" else "Wake-up alarm is off") +
             (if (st != null) "\n📚 Next desk check: ${fmtTime(st)}" else "")

@@ -61,6 +61,17 @@ object Scheduler {
         val p = Prefs(ctx)
         val am = ctx.getSystemService(AlarmManager::class.java)
 
+        // Builds 1–4 scheduled alarms under an older name; cancel any leftover so an old time can't ring.
+        val legacy = PendingIntent.getBroadcast(
+            ctx, REQ_WAKE,
+            Intent(ctx, AlarmReceiver::class.java).setAction(AlarmReceiver.ACTION_FIRE),
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (legacy != null) {
+            am.cancel(legacy)
+            legacy.cancel()
+        }
+
         val study = alarmIntent(ctx, Prefs.MODE_STUDY)
         am.cancel(study)
         if (p.studyEnabled) nextStudy(p)?.let { set(ctx, it, study) }

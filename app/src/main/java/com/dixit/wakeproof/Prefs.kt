@@ -58,12 +58,13 @@ class Prefs(ctx: Context) {
     var studyEnabled: Boolean
         get() = sp.getBoolean("studyEnabled", false)
         set(v) = edit { putBoolean("studyEnabled", v) }
-    var studyHour: Int
-        get() = sp.getInt("studyHour", 6)
-        set(v) = edit { putInt("studyHour", v) }
-    var studyMinute: Int
-        get() = sp.getInt("studyMinute", 30)
-        set(v) = edit { putInt("studyMinute", v) }
+    /** Desk check rings this many minutes after the wake-up alarm time. */
+    var studyOffsetMin: Int
+        get() = sp.getInt("studyOffsetMin", 30)
+        set(v) = edit { putInt("studyOffsetMin", v) }
+    private val studyTotalMin: Int get() = (hour * 60 + minute + studyOffsetMin) % (24 * 60)
+    val studyHour: Int get() = studyTotalMin / 60
+    val studyMinute: Int get() = studyTotalMin % 60
     var studyCards: Int
         get() = sp.getInt("studyCards", 20)
         set(v) = edit { putInt("studyCards", v) }
