@@ -239,6 +239,27 @@ class MainActivity : Activity() {
         studyTimeTv.text = "→ At desk by " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(cal.time)
     }
 
+    private fun explainLockMode() {
+        AlertDialog.Builder(this)
+            .setTitle("Turn on Lock mode")
+            .setMessage(
+                "Lock mode keeps you on the alarm screen while it rings and blocks the volume buttons. " +
+                    "It does nothing when no alarm is ringing, emergency calls always work, and it lets go after 60 minutes.\n\n" +
+                    "1. Tap \"Open app info\" → ⋮ menu (top right) → \"Allow restricted settings\" " +
+                    "(Android requires this for apps not from the Play Store).\n" +
+                    "2. Come back, tap this button again → \"Open Accessibility\" → Installed apps → " +
+                    "WakeProof Lock mode → turn it on."
+            )
+            .setPositiveButton("Open Accessibility") { _, _ ->
+                try { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } catch (e: Exception) {}
+            }
+            .setNeutralButton("Open app info") { _, _ ->
+                openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            }
+            .setNegativeButton("Later", null)
+            .show()
+    }
+
     private fun testKey() {
         save(showToast = false)
         val dlg = AlertDialog.Builder(this)
@@ -474,6 +495,9 @@ class MainActivity : Activity() {
             issues += "Allow notifications (needed for the alarm screen)" to {
                 requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
             }
+        }
+        if (!LockService.isEnabled(this)) {
+            issues += "Turn on Lock mode (can't leave the alarm or uninstall)" to { explainLockMode() }
         }
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             issues += "Allow camera (counts your push-ups)" to {

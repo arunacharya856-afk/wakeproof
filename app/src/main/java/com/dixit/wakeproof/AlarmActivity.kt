@@ -181,6 +181,15 @@ class AlarmActivity : ComponentActivity(), SensorEventListener {
         }
     }
 
+    /** Volume buttons do nothing while the alarm is on. */
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        val isVolume = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN ||
+            keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ||
+            keyCode == android.view.KeyEvent.KEYCODE_VOLUME_MUTE
+        if (isVolume && prefs.ringing && prefs.phase != PH_DONE) return true
+        return super.onKeyDown(keyCode, event)
+    }
+
     // ---------------- UI ----------------
 
     private fun buildUi() {
@@ -241,6 +250,16 @@ class AlarmActivity : ComponentActivity(), SensorEventListener {
         col.addView(actionBtn, Ui.lp(this, 22))
         altBtn = Ui.button(this, "", Ui.CARD, Ui.TEXT) { onAlt() }
         col.addView(altBtn, Ui.lp(this, 10))
+
+        // Always reachable, even in Lock mode.
+        val sos = Ui.text(this, "📞 Emergency call", 15f, Ui.MUTED).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, Ui.dp(this@AlarmActivity, 12), 0, Ui.dp(this@AlarmActivity, 12))
+            setOnClickListener {
+                try { startActivity(Intent(Intent.ACTION_DIAL)) } catch (e: Exception) {}
+            }
+        }
+        col.addView(sos, Ui.lp(this, 24))
 
         val scroll = ScrollView(this).apply {
             setBackgroundColor(Ui.BG)
@@ -637,6 +656,7 @@ class AlarmActivity : ComponentActivity(), SensorEventListener {
             }
         }
         inCamera = true
+        prefs.cameraUntil = System.currentTimeMillis() + 3 * 60_000L // Lock mode lets the camera through.
         // Give 2 minutes of quiet in the camera (or the rest of the library countdown); then the sound returns.
         val grace = if (isLib()) maxOf(120_000L, libLeft()) else 120_000L
         AlarmService.command(this, AlarmService.ACTION_QUIET, grace)
@@ -655,6 +675,7 @@ class AlarmActivity : ComponentActivity(), SensorEventListener {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQ_PHOTO) return
         inCamera = false
+        prefs.cameraUntil = 0L
         val uri = prefs.photoUri.takeIf { it.isNotBlank() }?.let { Uri.parse(it) } ?: return
         if (resultCode != RESULT_OK) {
             deletePhoto(uri)

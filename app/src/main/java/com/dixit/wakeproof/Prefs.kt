@@ -106,7 +106,16 @@ class Prefs(ctx: Context) {
     // ---- Live alarm state ----
     var ringing: Boolean
         get() = sp.getBoolean("ringing", false)
-        set(v) = edit { putBoolean("ringing", v) }
+        set(v) = edit {
+            putBoolean("ringing", v)
+            if (v && !sp.getBoolean("ringing", false)) putLong("ringSince", System.currentTimeMillis())
+        }
+    /** When the current alarm started ringing (the phone lock releases after an hour as a safety net). */
+    val ringSince: Long get() = sp.getLong("ringSince", 0L)
+    /** The camera app may be used until this time (during a photo step). */
+    var cameraUntil: Long
+        get() = sp.getLong("cameraUntil", 0L)
+        set(v) = edit { putLong("cameraUntil", v) }
     var phase: Int
         get() = sp.getInt("phase", 0)
         set(v) = edit { putInt("phase", v) }

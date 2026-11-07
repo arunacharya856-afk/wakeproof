@@ -48,6 +48,21 @@ class AlarmService : Service() {
         }
     }
 
+    /** Volume the alarm must stay at while ringing; anything lower gets pushed back up. */
+    private var lockedVolume = -1
+    private val volumeGuard = object : Runnable {
+        override fun run() {
+            if (!isLoud || lockedVolume < 0) return
+            try {
+                val am = getSystemService(AudioManager::class.java)
+                if (am.getStreamVolume(AudioManager.STREAM_ALARM) < lockedVolume) {
+                    am.setStreamVolume(AudioManager.STREAM_ALARM, lockedVolume, 0)
+                }
+            } catch (e: Exception) {}
+            handler.postDelayed(this, 500)
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -102,9 +117,13 @@ class AlarmService : Service() {
         stopSound()
         val am = getSystemService(AudioManager::class.java)
         val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-        if (am.getStreamVolume(AudioManager.STREAM_ALARM) == 0) {
-            try { am.setStreamVolume(AudioManager.STREAM_ALARM, (max * 0.7).toInt().coerceAtLeast(1), 0) } catch (e: Exception) {}
+        // Lock the alarm volume at no less than 80% of max (or higher if it's already louder).
+        if (lockedVolume < 0) {
+            lockedVolume = maxOf(am.getStreamVolume(AudioManager.STREAM_ALARM), (max * 0.8).toInt().coerceAtLeast(1))
         }
+        try { am.setStreamVolume(AudioManager.STREAM_ALARM, lockedVolume, 0) } catch (e: Exception) {}
+        handler.removeCallbacks(volumeGuard)
+        handler.post(volumeGuard)
         val candidates = listOfNotNull<Uri>(
             RingtoneManager.getActualDefaultRingtoneUri(this, RingtoneManager.TYPE_ALARM),
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),

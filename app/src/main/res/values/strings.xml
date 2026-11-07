@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lock_service_desc">WakeProof Lock mode: while your alarm is ringing, it keeps you on the alarm screen (other apps, Settings and uninstalling bounce back) and blocks the volume buttons. Phone/emergency calls always work. It does nothing when no alarm is ringing, and it lets go after 60 minutes.</string>
+</resources>
